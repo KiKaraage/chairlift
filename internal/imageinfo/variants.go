@@ -52,17 +52,17 @@ func (d Driver) suffix() string {
 // Verified against GHCR by manifest request on 2026-08-17, for
 // ghcr.io/ublue-os/bluefin:
 //
-//	image                    latest stable gts  beta lts  lts-hwe
-//	bluefin                  200    200    200  200  200  200
-//	bluefin-nvidia           200    200    200  200  404  404
-//	bluefin-nvidia-open      200    200    200  200  404  404
-//	bluefin-dx               200    200    200  200  200  200
-//	bluefin-dx-nvidia        200    200    200  200  404  404
-//	bluefin-asus             200    404    404  404  404  404
-//	bluefin-surface          200    404    404  404  404  404
+//	image                    latest stable beta lts  lts-hwe
+//	bluefin                  200    200    200  200  200
+//	bluefin-nvidia           200    200    200  404  404
+//	bluefin-nvidia-open      200    200    200  404  404
+//	bluefin-dx               200    200    200  200  200
+//	bluefin-dx-nvidia        200    200    200  404  404
+//	bluefin-asus             200    404    404  404  404
+//	bluefin-surface          200    404    404  404  404
 //
 // So an LTS host has **no** NVIDIA variant: the driver images are published
-// for the latest/stable/gts streams only. finupdate's KNOWN_FAMILIES models
+// for the latest/stable streams only. finupdate's KNOWN_FAMILIES models
 // variants per family rather than per stream and would offer
 // `bluefin-nvidia:lts`, which is a 404. ChairLift keys on both.
 //
@@ -105,13 +105,15 @@ type driverStreams struct {
 // channels.yml; see LoadTable.
 var imageDriverMap = map[string][]driverStreams{
 	"ghcr.io/ublue-os/bluefin": {
+		// No "gts": ChairLift does not offer that stream, though the tag
+		// still resolves (200 on 2026-09-26); see imageChannelMap.
 		// No "beta" anywhere: ghcr.io/ublue-os/bluefin:beta answered 404 on
 		// 2026-09-21. bluefin-nvidia:beta is still 200, but with no base
 		// image on that stream a host that took the switch could not come
 		// back, so the variant is not offered either.
-		{driver: DriverStandard, streams: []string{"latest", "stable", "stable-daily", "gts", "lts", "lts-hwe", "lts-testing", "lts-hwe-testing"}},
-		{driver: DriverNVIDIA, streams: []string{"latest", "stable", "stable-daily", "gts"}},
-		{driver: DriverNVIDIAOpen, streams: []string{"latest", "stable", "stable-daily", "gts"}},
+		{driver: DriverStandard, streams: []string{"latest", "stable", "stable-daily", "lts", "lts-hwe", "lts-testing", "lts-hwe-testing"}},
+		{driver: DriverNVIDIA, streams: []string{"latest", "stable", "stable-daily"}},
+		{driver: DriverNVIDIAOpen, streams: []string{"latest", "stable", "stable-daily"}},
 	},
 	"ghcr.io/projectbluefin/dakota": {
 		{driver: DriverStandard, streams: []string{"latest", "stable", "testing", "next", "btw"}},
