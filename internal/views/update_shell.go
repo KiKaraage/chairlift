@@ -25,7 +25,7 @@ import (
 type UpdateShell struct {
 	coordinator   *updateflow.Coordinator
 	preferences   func() userprefs.Values
-	configured    func() map[updateflow.SourceID]bool
+	policy        func() map[updateflow.SourceID]updateflow.Policy
 	toasts        ToastAdder
 	snapshot      updateflow.Snapshot
 	sources       []updateflow.SourceState
@@ -68,18 +68,20 @@ func (s *UpdateShell) SetOnUpdateFinished(fn func(updateflow.Snapshot)) {
 }
 
 // NewUpdateShell builds a status-first update surface and starts its initial
-// check before returning.
+// check before returning. policy reports, per source, the administrator's
+// configuration and the host capability floor as separate facts, so a source
+// the host cannot back is not reported as disabled by the administrator.
 func NewUpdateShell(
 	coordinator *updateflow.Coordinator,
 	preferences func() userprefs.Values,
-	configured func() map[updateflow.SourceID]bool,
+	policy func() map[updateflow.SourceID]updateflow.Policy,
 	toasts ToastAdder,
 ) *UpdateShell {
 	lifecycle, cancel := context.WithCancel(context.Background())
 	s := &UpdateShell{
 		coordinator: coordinator,
 		preferences: preferences,
-		configured:  configured,
+		policy:      policy,
 		toasts:      toasts,
 		sourceRows:  make(map[updateflow.SourceID]*sourceRow),
 		lifecycle:   lifecycle,
@@ -139,8 +141,29 @@ func (s *UpdateShell) SetSecondaryContent(page *adw.PreferencesPage) {
 	if parent := widget.GetParent(); parent != nil {
 		gtk.ViewportNewFromInternalPtr(parent.GoPointer()).SetChild(nil)
 	}
+	growWithContent(widget)
 	s.content.Append(widget)
 	s.secondary = widget
+}
+
+// growWithContent stops a widget that scrolls internally from doing so, so
+// it reports its content's full height instead of a scroller's small minimum.
+//
+// AdwStatusPage and AdwPreferencesPage are each built around a GtkScrolledWindow
+// as their only child. Nested in this shell's own scroller, both were
+// allocated that scroller-sized minimum once the preferences page was mounted
+// below the sources: the status page's title and description were clipped
+// away while its icon was cut in half, and the page scrolled inside the page.
+// The outer scroller alone scrolls the destination. Any other child shape is
+// left untouched.
+func growWithContent(widget *gtk.Widget) {
+	child := widget.GetFirstChild()
+	if child == nil || child.GetCssName() != "scrolledwindow" {
+		return
+	}
+	scroller := gtk.ScrolledWindowNewFromInternalPtr(child.GoPointer())
+	scroller.SetPolicy(gtk.PolicyNeverValue, gtk.PolicyNeverValue)
+	scroller.SetPropagateNaturalHeight(true)
 }
 
 // StartCheck starts a generation-guarded check away from the GTK thread.
@@ -162,10 +185,10 @@ func (s *UpdateShell) StartCheck() {
 	}
 	s.sourcesReady = false
 	preferences := s.currentPreferences()
-	configured := s.currentConfiguration()
+	policy := s.currentPolicy()
 	go func() {
 		defer cancel()
-		s.coordinator.Check(ctx, preferences, configured, s.publish)
+		s.coordinator.Check(ctx, preferences, policy, s.publish)
 	}()
 }
 
@@ -415,6 +438,7 @@ func (s *UpdateShell) build() {
 	s.progress.SetHexpand(true)
 	controls.Append(&s.progress.Widget)
 	s.statusPage.SetChild(&controls.Widget)
+	growWithContent(&s.statusPage.Widget)
 	content.Append(&s.statusPage.Widget)
 
 	s.banner = adw.NewBanner("")
@@ -432,7 +456,6 @@ func (s *UpdateShell) build() {
 	// so the compact layout never applies reliably. Both values sit under
 	// the 600px condition so the breakpoint can actually be reached.
 	s.breakpointBin.SetSizeRequest(360, 200)
-	s.breakpointBin.SetChild(&content.Widget)
 	compactBreakpoint := adw.NewBreakpoint(adw.BreakpointConditionParse("max-width: 600px"))
 	applyCompact := func(_ adw.Breakpoint) {
 		s.setCompactRows(true)
@@ -450,9 +473,17 @@ func (s *UpdateShell) build() {
 	scrolled.SetVexpand(true)
 	clamp := adw.NewClamp()
 	clamp.SetMaximumSize(720)
-	clamp.SetChild(&s.breakpointBin.Widget)
+	clamp.SetChild(&content.Widget)
 	scrolled.SetChild(&clamp.Widget)
-	s.toolbarView.SetContent(&scrolled.Widget)
+	// The breakpoint bin wraps the scroller, not the other way round. An
+	// AdwBreakpointBin never asks for more height than its size request, so
+	// inside a GtkScrolledWindow it got one viewport of height and clipped
+	// everything below ("GtkBox exceeds AdwBreakpointBin height: requested
+	// 1844 px, 844 px available"): once the preferences page mounted,
+	// automatic updates, the release channel, and the graphics driver could
+	// not be scrolled to.
+	s.breakpointBin.SetChild(&scrolled.Widget)
+	s.toolbarView.SetContent(&s.breakpointBin.Widget)
 
 	s.toastOverlay = adw.NewToastOverlay()
 	s.toastOverlay.SetChild(&s.toolbarView.Widget)
@@ -549,17 +580,17 @@ func (s *UpdateShell) currentPreferences() userprefs.Values {
 	return s.preferences()
 }
 
-func (s *UpdateShell) currentConfiguration() map[updateflow.SourceID]bool {
-	if s.configured == nil {
+func (s *UpdateShell) currentPolicy() map[updateflow.SourceID]updateflow.Policy {
+	if s.policy == nil {
 		return nil
 	}
-	values := s.configured()
+	values := s.policy()
 	if values == nil {
 		return nil
 	}
-	cloned := make(map[updateflow.SourceID]bool, len(values))
-	for id, enabled := range values {
-		cloned[id] = enabled
+	cloned := make(map[updateflow.SourceID]updateflow.Policy, len(values))
+	for id, policy := range values {
+		cloned[id] = policy
 	}
 	return cloned
 }
