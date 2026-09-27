@@ -243,3 +243,33 @@ func TestGateResetAndCompletion(t *testing.T) {
 		t.Fatal("reset reopened a completed gate")
 	}
 }
+
+// TestGateInstallPhaseFollowsTheLifecycle covers what a late-connected
+// button reads to join at the phase every other button for the collection
+// shows: a button built after a run started must read "Installing…" and be
+// insensitive, one built after a live success "Installed" and insensitive,
+// and one built after a failed or dry run "Install" and sensitive — never a
+// sensitive "Install" over a completed gate, which does nothing when clicked.
+func TestGateInstallPhaseFollowsTheLifecycle(t *testing.T) {
+	var gate InstallGate
+	steps := []struct {
+		name          string
+		transition    func()
+		wantLabel     string
+		wantSensitive bool
+	}{
+		{"ready", func() {}, InstallLabelReady, true},
+		{"running", func() { gate.TryStart() }, InstallLabelRunning, false},
+		{"reset after a failure or dry run", func() { gate.Reset() }, InstallLabelReady, true},
+		{"running again", func() { gate.TryStart() }, InstallLabelRunning, false},
+		{"completed", func() { gate.Complete() }, InstallLabelCompleted, false},
+		{"reset cannot reopen a completion", func() { gate.Reset() }, InstallLabelCompleted, false},
+	}
+	for _, step := range steps {
+		step.transition()
+		label, sensitive := gate.InstallPhase()
+		if label != step.wantLabel || sensitive != step.wantSensitive {
+			t.Fatalf("%s: InstallPhase = (%q, %v), want (%q, %v)", step.name, label, sensitive, step.wantLabel, step.wantSensitive)
+		}
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/projectbluefin/chairlift/internal/dryrun"
 	"github.com/projectbluefin/chairlift/internal/version"
@@ -186,6 +187,32 @@ func unquote(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// WriteTimeout bounds one disposition read or write. Each is a `gsettings`
+// spawn; a wedged dconf must not pin a goroutine for the life of the process.
+const WriteTimeout = 10 * time.Second
+
+// RecordSkip persists a skip — Get Moving, or the dialog dismissed without a
+// decision — without demoting a recorded completion: the assistant stays
+// reachable after setup finished, and a skip there must not overwrite the
+// stronger state. It reports the disposition now recorded and whether a
+// write happened. A read that fails refuses the write: with the current
+// state unknown, writing "skipped" could overwrite a completion, and the
+// worst a refusal costs is the assistant returning until the read works.
+func RecordSkip(ctx context.Context, store Store) (recorded Disposition, wrote bool, err error) {
+	current, err := store.GetDisposition(ctx)
+	if err != nil {
+		return DispositionNotAddressed, false, fmt.Errorf("firstrun: reading the disposition before recording a skip: %w", err)
+	}
+	next := SkipPreserving(current)
+	if next == current {
+		return current, false, nil
+	}
+	if err := store.SetDisposition(ctx, next); err != nil {
+		return current, false, err
+	}
+	return next, true, nil
 }
 
 // ShouldPresent decides whether to present the first-run assistant dialog.

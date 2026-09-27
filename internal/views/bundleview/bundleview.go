@@ -33,11 +33,11 @@ type Presentation struct {
 	PlaceholderSubtitle string
 }
 
-// groupDescription states what the group does and the two consequences that
+// GroupDescription states what the group does and the two consequences that
 // matter once, at the group, rather than repeating them on every row: the
 // software comes from a third party, and a whole collection is a large
 // download.
-const groupDescription = "Install a set of apps and tools together in one step. " +
+const GroupDescription = "Install a set of apps and tools together in one step. " +
 	"Collections come from Homebrew, a third-party source, and can be a large download."
 
 // Present derives the collection group's complete loaded state. warning is
@@ -45,7 +45,7 @@ const groupDescription = "Install a set of apps and tools together in one step. 
 // a diagnostic for the log and never reaches the UI, because it names the
 // locations that were searched.
 func Present(count int, warning string) Presentation {
-	result := Presentation{Description: groupDescription}
+	result := Presentation{Description: GroupDescription}
 
 	switch {
 	case count == 0 && warning == "":
@@ -236,4 +236,36 @@ func (g *InstallGate) Reset() {
 // Complete permanently closes a successfully installed collection action.
 func (g *InstallGate) Complete() {
 	g.state.CompareAndSwap(gateRunning, gateComplete)
+}
+
+// Running reports whether an install is in progress behind the gate.
+func (g *InstallGate) Running() bool {
+	return g.state.Load() == gateRunning
+}
+
+// Completed reports whether a live install succeeded and closed the gate.
+func (g *InstallGate) Completed() bool {
+	return g.state.Load() == gateComplete
+}
+
+// The three phases every Install button for a collection can show.
+const (
+	InstallLabelReady     = "Install"
+	InstallLabelRunning   = "Installing…"
+	InstallLabelCompleted = "Installed"
+)
+
+// InstallPhase is the label and sensitivity every button bound to a
+// collection shows for the gate's current state. A button connected while a
+// run is in progress, or after one completed, joins at this phase rather
+// than at a fresh "Install" that would do nothing when clicked.
+func (g *InstallGate) InstallPhase() (label string, sensitive bool) {
+	switch {
+	case g.Completed():
+		return InstallLabelCompleted, false
+	case g.Running():
+		return InstallLabelRunning, false
+	default:
+		return InstallLabelReady, true
+	}
 }
