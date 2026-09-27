@@ -4,8 +4,8 @@
 
 ChairLift is developed for the Bluefin family (Bluefin, Bluefin LTS, Dakota).
 Install the latest
-[release](https://github.com/projectbluefin/chairlift/releases) and keep it
-updated:
+[release](https://github.com/projectbluefin/chairlift/releases) through the
+Homebrew cask, which installs the release archive, and keep it updated:
 
 | Version | Supported      |
 | ------- | -------------- |
@@ -18,7 +18,7 @@ security updates.
 
 ## Reporting a Vulnerability
 
-ChairLift ships a privileged `pkexec` helper (`cmd/chairlift-ublue-helper`)
+ChairLift ships a privileged `pkexec` helper (`cmd/chairlift-helper`)
 that runs as root, so a flaw in its input validation is high-impact. Thank you
 for helping keep it safe.
 

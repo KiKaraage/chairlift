@@ -111,14 +111,13 @@ func TestCurrentDocumentationMatchesSourceFacts(t *testing.T) {
 			readRepoFile(t, "README.md"),
 			readRepoFile(t, "AGENTS.md"),
 			readRepoFile(t, filepath.Join("docs", "index.md")),
-			readRepoFile(t, filepath.Join("docs", "adr", "0006-split-system-integration-package-with-mutual-conflicts.md")),
 			readRepoFile(t, filepath.Join("docs", "design", "overview.md")),
 			readRepoFile(t, filepath.Join("docs", "design", "package-managers.md")),
 		}, "\n")
 
 		for _, required := range []string{
 			"/usr/bin/chairlift-updex-helper",
-			"/usr/bin/chairlift-ublue-helper",
+			"/usr/bin/chairlift-helper",
 			"/usr/share/polkit-1/actions/io.projectbluefin.chairlift.bootc.policy",
 			"/usr/share/polkit-1/actions/io.projectbluefin.chairlift.updex.policy",
 			"/usr/share/polkit-1/actions/io.projectbluefin.chairlift.ublue.policy",
