@@ -95,15 +95,39 @@ predicate cannot be met and no launcher is wired; #255 and #261 complete it.
   set`, authenticated with llmman's own peer key; this host is never
   advertised as a peer, and no firewall, key distribution, folder sync, or
   sharding is performed. Known peer addresses and their enabled states are
-  tracked locally in `~/.local/share/chairlift/agent-mode-peers.json`; the peer
-  key is passed to `llmman config set` on argv (a known limitation until stdin
-  support lands).
+  tracked locally in `~/.local/share/chairlift/agent-mode-peers.json`. The two
+  channels that expose the peer key, and who owns each, are described once
+  under *Secrets* below.
 - *Configuration ownership:* ChairLift writes no llmman TOML; aliases, peers,
   and auth go through `llmman config set/get`. Goose provider choice stays
   invocation-scoped (`llmman launch goose`); OMP uses a named, isolated
   profile.
 - *Secrets:* ChairLift stores and logs no API key, provider credential, or
-  prompt.
+  prompt. The one peer key still reaches llmman over two channels, which
+  ChairLift neither stores nor logs, and which have different owners.
+  The first is argv: `llmman config set` takes the value only as a
+  command-line argument, so the key is world-readable through
+  /proc/<pid>/cmdline for that one process's life. That grammar is llmman's,
+  but the argv channel is a ChairLift choice, not an upstream constraint:
+  `LLMMAN_PEER_API_KEY` overrides `[aggregation] api_key` for `llmman
+  serve`, and ChairLift already owns the unit and
+  `~/.config/environment.d/10-chairlift-llmman.conf` that could carry it.
+  That route is not taken because it trades a brief world-readable argv
+  window for a key held at rest in a file ChairLift writes — departing from
+  both the *Configuration ownership* rule above (auth goes through `llmman
+  config set/get`, ChairLift writes no llmman configuration of its own) and
+  from this bullet's "stores no API key". A third form, stdin, would cost
+  neither and does not exist upstream.
+  The second is transport: `NodeURL` defaults a scheme-less peer address to
+  http, so the `Authorization: Bearer` header travels cleartext unless the
+  peer was added as https://. Nothing upstream forces that default —
+  ChairLift could default to https or refuse a scheme-less peer while a key
+  is set — so this one is ours to change, and until it does, use https://
+  when the peer serves TLS. Neither channel is closed by documenting it:
+  #416 stays open as the tracking issue for an argv-free input path
+  (upstream stdin support, or the `LLMMAN_PEER_API_KEY` trade-off decided
+  here) and for an add-peer warning when a peer resolves to http with a key
+  set (#260, which owned peer management, is closed).
 - *Privilege:* no pkexec route, helper subcommand, or PolicyKit action.
 
 **Issue map.** #253 (this decision), #254 (llmman provisioning and user
