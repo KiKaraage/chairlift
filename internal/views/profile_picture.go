@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sync"
 
 	"github.com/projectbluefin/chairlift/internal/avatar"
 	"github.com/projectbluefin/chairlift/internal/dryrun"
@@ -41,11 +42,11 @@ type avatarPicker struct {
 	checks  []*gtk.Image
 	catalog []avatar.Avatar
 
-	// selected is the entry being previewed; png is its transcoded artwork
-	// once downloaded, nil until then or after a failure.
+	// loaded reports whether texture matches selected: false between a pick
+	// and its texture arriving. It gates Apply.
 	selected *avatar.Avatar
-	png      []byte
 	texture  *gdk.Texture
+	loaded   bool
 	fetches  actionstate.RefreshGate
 	applying actionstate.Gate
 }
@@ -158,6 +159,7 @@ func (uh *UserHome) buildAvatarPicker(p *avatarPicker) {
 
 	preview := adw.NewAvatar(128, "", false)
 	preview.SetMarginTop(12)
+
 	label := gtk.NewLabel(pageview.AvatarPickerPrompt)
 	label.AddCssClass("dim-label")
 
@@ -211,28 +213,29 @@ func (uh *UserHome) buildAvatarPicker(p *avatarPicker) {
 
 	applyClicked := func(_ gtk.Button) { uh.applyAvatar(p) }
 	apply.ConnectClicked(&applyClicked)
+
+	prefetchPreviews(p.catalog)
 }
 
-// previewAvatar selects one catalog entry and downloads its artwork for the
-// preview. Downloading changes nothing on the account; Apply does that.
+// previewAvatar selects one catalog entry and shows its preview. Selecting
+// changes nothing on the account; Apply does that.
 func (uh *UserHome) previewAvatar(p *avatarPicker, index int) {
 	entry := p.catalog[index]
 	p.selected = &entry
-	p.png, p.texture = nil, nil
+	p.loaded = false
 	for i, check := range p.checks {
 		check.SetVisible(i == index)
 	}
 	text := pageview.AvatarEntryRow(entry)
 	p.label.SetText(text.Title + " · " + text.Subtitle)
-	// A nil *PaintableBase passes NULL, clearing the previous preview; a
-	// bare nil interface would panic inside the binding.
-	p.preview.SetCustomImage((*gdk.PaintableBase)(nil))
 	p.banner.SetRevealed(false)
 	p.apply.SetSensitive(pageview.AvatarApplyEnabled(p.applying.Running(), false))
 
+	// Keep the previous image up until this one's texture is ready, so
+	// switching never flashes the placeholder.
 	generation := p.fetches.Begin()
 	go func() {
-		png, texture, err := fetchAvatarPreview(entry.ID)
+		texture, err := previewTexture(entry.ID)
 		sgtk.RunOnMainThread(func() {
 			// A later pick supersedes this one; its result must not
 			// replace the newer preview.
@@ -245,45 +248,84 @@ func (uh *UserHome) previewAvatar(p *avatarPicker, index int) {
 				p.banner.SetRevealed(true)
 				return
 			}
-			p.png, p.texture = png, texture
+			p.texture, p.loaded = texture, true
 			p.preview.SetCustomImage(texture)
 			p.apply.SetSensitive(pageview.AvatarApplyEnabled(p.applying.Running(), true))
 		})
 	}()
 }
 
-// fetchAvatarPreview downloads and transcodes one entry. It runs off the
-// main thread.
-func fetchAvatarPreview(id string) ([]byte, *gdk.Texture, error) {
-	webp, err := avatar.FetchAvatar(context.Background(), id)
-	if err != nil {
-		return nil, nil, err
+// One immutable texture per entry, built once and shared across picks.
+var (
+	previewTextureMu sync.Mutex
+	previewTextures  = map[string]*gdk.Texture{}
+)
+
+// previewTexture returns the shared texture for one entry, building it from
+// the embedded preview PNG on first use.
+func previewTexture(id string) (*gdk.Texture, error) {
+	previewTextureMu.Lock()
+	cached, ok := previewTextures[id]
+	previewTextureMu.Unlock()
+	if ok {
+		return cached, nil
 	}
-	png, err := avatar.TranscodeWebPToPNG(bytes.NewReader(webp))
+
+	png, err := avatar.PreviewPNG(id)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	texture, err := gdk.NewTextureFromBytes(glib.NewBytes(png, uint(len(png))))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return png, texture, nil
+
+	previewTextureMu.Lock()
+	previewTextures[id] = texture
+	previewTextureMu.Unlock()
+	return texture, nil
+}
+
+// prefetchPreviews builds every entry's texture in the background so the first
+// pick of each is already in memory.
+func prefetchPreviews(catalog []avatar.Avatar) {
+	go func() {
+		for _, entry := range catalog {
+			if _, err := previewTexture(entry.ID); err != nil {
+				log.Printf("avatar: prefetching %s: %v", entry.ID, err)
+			}
+		}
+	}()
+}
+
+// fullSizeAvatarPNG transcodes one entry at the applied-avatar size; the
+// preview only holds the small PNG.
+func fullSizeAvatarPNG(entry avatar.Avatar) ([]byte, error) {
+	webp, err := avatar.FetchAvatar(context.Background(), entry.ID)
+	if err != nil {
+		return nil, err
+	}
+	return avatar.TranscodeWebPToPNG(bytes.NewReader(webp))
 }
 
 // applyAvatar sets the previewed entry on the account. A failure keeps the
 // dialog open with the old picture untouched; a dry run writes nothing.
 func (uh *UserHome) applyAvatar(p *avatarPicker) {
-	if p.selected == nil || p.png == nil || !p.applying.TryStart() {
+	if p.selected == nil || !p.loaded || !p.applying.TryStart() {
 		return
 	}
-	entry, png, texture := *p.selected, p.png, p.texture
+	entry, texture := *p.selected, p.texture
 	p.apply.SetSensitive(pageview.AvatarApplyEnabled(p.applying.Running(), true))
 
 	go func() {
-		route, err := dispatchAvatar(entry, png)
+		png, err := fullSizeAvatarPNG(entry)
+		var route avatar.Route
+		if err == nil {
+			route, err = dispatchAvatar(entry, png)
+		}
 		sgtk.RunOnMainThread(func() {
 			p.applying.Reset()
-			p.apply.SetSensitive(pageview.AvatarApplyEnabled(false, p.png != nil))
+			p.apply.SetSensitive(pageview.AvatarApplyEnabled(false, p.loaded))
 			if err != nil {
 				log.Printf("avatar: applying %s: %v", entry.ID, err)
 				p.banner.SetTitle(pageview.AvatarApplyFailed(entry))
