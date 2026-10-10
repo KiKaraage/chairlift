@@ -110,7 +110,7 @@ func TestTranscodeWebPToPNGRejectsPayloadsThatDoNotDecode(t *testing.T) {
 // that keeps it testable without a multi-megabyte fixture.
 func TestTranscodeWebPToPNGReportsTooLargeWhenNoRungFitsTheCeiling(t *testing.T) {
 	payload := readWebPSample(t, "gradient-lossy.webp")
-	out, err := transcodeWebPToPNG(bytes.NewReader(payload), 0)
+	out, err := transcodeWebPToPNG(bytes.NewReader(payload), AvatarSize, 0)
 	if !errors.Is(err, ErrAvatarTooLarge) {
 		t.Fatalf("error = %v, want ErrAvatarTooLarge", err)
 	}
@@ -134,7 +134,7 @@ func TestTranscodeWebPToPNGReportsTooLargeWhenNoRungFitsTheCeiling(t *testing.T)
 func TestTranscodeWebPToPNGDownsamplesWhenTheFullSizeEncodeExceedsTheCeiling(t *testing.T) {
 	const downsampleCeiling = 105_000 // straddles katharina's full-size (132,282) and 384-rung (79,753) attempts
 	payload := readWebPSample(t, "katharina.webp")
-	out, err := transcodeWebPToPNG(bytes.NewReader(payload), downsampleCeiling)
+	out, err := transcodeWebPToPNG(bytes.NewReader(payload), AvatarSize, downsampleCeiling)
 	if err != nil {
 		t.Fatalf("transcodeWebPToPNG() error = %v", err)
 	}
@@ -275,5 +275,26 @@ func TestTranscodeWebPToPNGAcceptsAPayloadExactlyOnTheByteBound(t *testing.T) {
 	}
 	if _, err := TranscodeWebPToPNG(bytes.NewReader(payload)); err != nil {
 		t.Fatalf("TranscodeWebPToPNG() error = %v, want a payload sitting on the bound to be accepted", err)
+	}
+}
+
+// TestTranscodePreviewWebPToPNGIsPreviewSized pins the lightweight path: a
+// PreviewSize square under the preview ceiling, so the picker never encodes a
+// canvas larger than the AdwAvatar it draws.
+func TestTranscodePreviewWebPToPNGIsPreviewSized(t *testing.T) {
+	payload := readWebPSample(t, "dakota.webp")
+	out, err := TranscodePreviewWebPToPNG(bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("TranscodePreviewWebPToPNG() error = %v", err)
+	}
+	if len(out) > MaxPreviewPNGBytes {
+		t.Errorf("encoded preview PNG is %d bytes, over the %d-byte ceiling", len(out), MaxPreviewPNGBytes)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("decoding the preview result as PNG: %v", err)
+	}
+	if want := image.Rect(0, 0, PreviewSize, PreviewSize); img.Bounds() != want {
+		t.Errorf("bounds = %v, want %v", img.Bounds(), want)
 	}
 }
