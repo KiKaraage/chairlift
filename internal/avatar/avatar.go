@@ -1,5 +1,6 @@
-// Package avatar owns the dinosaur avatar catalog and the seam that fetches
-// one illustration from it.
+// Package avatar owns the dinosaur avatar catalog and the seam that resolves
+// one illustration from it: the copy embedded in the binary first, the pinned
+// commit only when no embedded copy exists.
 //
 // The catalog is the set of dinosaur characters Project Bluefin publishes as
 // artwork, transcribed from `projectbluefin/website`'s own
@@ -15,11 +16,12 @@ package avatar
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -53,12 +55,19 @@ const dinoArtworkRaw = "https://raw.githubusercontent.com/projectbluefin/website
 // reason: title-casing an ID yields "Bob Torosaurus" where the project writes
 // "Bob".
 //
-// Embedding the catalog is what makes the picker complete and instant with no
-// network: ten lines of text against megabytes of artwork nobody needs until
-// they pick one.
+// The catalog is embedded so the picker is complete with no network; the
+// artwork it names is embedded too (embeddedArtworkFS), so a pick reads from
+// the binary rather than the pinned commit.
 //
 //go:embed assets/dino-avatars.txt
 var dinoManifest string
+
+// embeddedArtworkFS holds every catalog illustration. The tree is flat while
+// the repository's is not — katharina.webp lives under characters/header/
+// upstream — so embeddedArtwork keys each file by its base name.
+//
+//go:embed assets/*.webp
+var embeddedArtworkFS embed.FS
 
 // fetchTimeout bounds the round trip. A single illustration is a couple of
 // hundred kilobytes; a slow network should surface a failure, not a frozen
@@ -107,7 +116,8 @@ type Avatar struct {
 // replaces it.
 type FetchFunc func(ctx context.Context, url string) ([]byte, error)
 
-// Fetch is the function FetchAvatar calls. Tests replace it.
+// Fetch is the function FetchAvatar falls back to when the binary embeds no
+// artwork for an entry. Tests replace it.
 var Fetch FetchFunc = httpFetch
 
 func httpFetch(ctx context.Context, url string) ([]byte, error) {
@@ -135,6 +145,24 @@ func httpFetch(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("avatar: artwork exceeds the %d byte limit", maxArtworkBytes)
 	}
 	return data, nil
+}
+
+// ArtworkFunc reads one catalog illustration from local storage, keyed by the
+// entry's literal Path column. It reports false when no local copy exists,
+// which is FetchAvatar's signal to fall back to the network. It is a variable
+// so tests can reach the network path.
+type ArtworkFunc func(artworkPath string) ([]byte, bool)
+
+// LocalArtwork is the function FetchAvatar consults before the network.
+var LocalArtwork ArtworkFunc = embeddedArtwork
+
+// embeddedArtwork returns the illustration embedded for one catalog Path.
+func embeddedArtwork(artworkPath string) ([]byte, bool) {
+	data, err := embeddedArtworkFS.ReadFile("assets/" + path.Base(artworkPath))
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 var (
@@ -202,15 +230,17 @@ func ArtworkURL(entry Avatar) string {
 	return dinoArtworkRaw + entry.Path
 }
 
-// FetchAvatar retrieves one catalog illustration by ID.
-//
-// The URL is composed from the entry's literal Path column, never from the ID,
-// so a catalog whose filenames disagree with its identifiers — which three of
-// the ten do — still fetches the right file.
+// FetchAvatar retrieves one catalog illustration by ID, preferring the embedded
+// copy and falling back to the pinned commit only when none is embedded. The
+// bytes come from the Path column, never a derivation from the ID.
 func FetchAvatar(ctx context.Context, id string) ([]byte, error) {
 	entry, ok := Lookup(id)
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrAvatarNotFound, id)
+	}
+
+	if data, ok := LocalArtwork(entry.Path); ok {
+		return data, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)

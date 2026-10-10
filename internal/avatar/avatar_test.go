@@ -1,6 +1,7 @@
 package avatar
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -17,6 +18,16 @@ func swapFetch(t *testing.T, fn FetchFunc) {
 	original := Fetch
 	Fetch = fn
 	t.Cleanup(func() { Fetch = original })
+}
+
+// swapLocalArtwork points the embedded-artwork seam at fn for one test and
+// restores the real one afterwards, so a test can reach the network fallback
+// without the embedded copy answering first.
+func swapLocalArtwork(t *testing.T, fn ArtworkFunc) {
+	t.Helper()
+	original := LocalArtwork
+	LocalArtwork = fn
+	t.Cleanup(func() { LocalArtwork = original })
 }
 
 func TestCatalogParsesEveryManifestLine(t *testing.T) {
@@ -183,6 +194,9 @@ func TestArtworkURLIsDerivedFromPathAtThePinnedCommit(t *testing.T) {
 
 func TestFetchAvatarRequestsTheLiteralPathForEveryID(t *testing.T) {
 	var requested []string
+	// Disable the embedded copy so the fallback, and the URL it composes, is
+	// what this test exercises.
+	swapLocalArtwork(t, func(string) ([]byte, bool) { return nil, false })
 	swapFetch(t, func(_ context.Context, url string) ([]byte, error) {
 		requested = append(requested, url)
 		return []byte("webp"), nil
@@ -223,10 +237,54 @@ func TestFetchAvatarRejectsAnUnknownIDBeforeAnyRequest(t *testing.T) {
 
 func TestFetchAvatarPropagatesTheSeamError(t *testing.T) {
 	want := errors.New("boom")
+	swapLocalArtwork(t, func(string) ([]byte, bool) { return nil, false })
 	swapFetch(t, func(_ context.Context, _ string) ([]byte, error) { return nil, want })
 
 	if _, err := FetchAvatar(context.Background(), "karl"); !errors.Is(err, want) {
 		t.Errorf("FetchAvatar error = %v, want %v", err, want)
+	}
+}
+
+// TestEmbeddedArtworkCoversEveryCatalogEntry guards the embedded set against
+// drift: a manifest row whose illustration was not downloaded would silently
+// fall back to the network, which is exactly what embedding exists to avoid.
+func TestEmbeddedArtworkCoversEveryCatalogEntry(t *testing.T) {
+	for _, entry := range Catalog() {
+		data, ok := embeddedArtwork(entry.Path)
+		if !ok {
+			t.Errorf("no embedded artwork for %s (%s)", entry.ID, entry.Path)
+			continue
+		}
+		if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+			t.Errorf("%s: embedded artwork is not a WebP container (%d bytes)", entry.ID, len(data))
+		}
+	}
+}
+
+// TestFetchAvatarServesEmbeddedArtworkWithoutTheNetwork pins the offline-first
+// contract: when the binary carries the artwork, no request is made.
+func TestFetchAvatarServesEmbeddedArtworkWithoutTheNetwork(t *testing.T) {
+	called := false
+	swapFetch(t, func(_ context.Context, _ string) ([]byte, error) {
+		called = true
+		return nil, errors.New("the network must not be reached")
+	})
+
+	for _, entry := range Catalog() {
+		got, err := FetchAvatar(context.Background(), entry.ID)
+		if err != nil {
+			t.Fatalf("FetchAvatar(%q): %v", entry.ID, err)
+		}
+		want, ok := embeddedArtwork(entry.Path)
+		if !ok {
+			t.Fatalf("no embedded artwork for %s", entry.ID)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("FetchAvatar(%q) did not return the embedded artwork", entry.ID)
+		}
+	}
+	if called {
+		t.Error("FetchAvatar reached the network despite an embedded copy")
 	}
 }
 
