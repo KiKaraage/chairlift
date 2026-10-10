@@ -52,8 +52,8 @@ type avatarPicker struct {
 }
 
 // buildAccountGroup builds the Profile Picture section. Opening the page
-// reads only the local picture file; the catalog is embedded and no artwork
-// is downloaded until the user picks an entry.
+// reads only the local picture file; the catalog and its artwork are
+// embedded, so nothing is fetched to show the picker.
 func (uh *UserHome) buildAccountGroup(page *adw.PreferencesPage) {
 	group := adw.NewPreferencesGroup()
 	group.SetTitle(pageview.AvatarGroupTitle)
@@ -301,7 +301,7 @@ func prefetchPreviews(catalog []avatar.Avatar) {
 // fullSizeAvatarPNG transcodes one entry at the applied-avatar size; the
 // preview only holds the small PNG.
 func fullSizeAvatarPNG(entry avatar.Avatar) ([]byte, error) {
-	webp, err := avatar.FetchAvatar(context.Background(), entry.ID)
+	webp, err := avatar.FetchAvatar(entry.ID)
 	if err != nil {
 		return nil, err
 	}

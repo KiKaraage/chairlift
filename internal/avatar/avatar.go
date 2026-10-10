@@ -1,49 +1,27 @@
-// Package avatar owns the dinosaur avatar catalog and the seam that resolves
-// one illustration from it: the copy embedded in the binary first, the pinned
-// commit only when no embedded copy exists.
+// Package avatar owns the dinosaur avatar catalog and the illustrations
+// bundled for it.
 //
 // The catalog is the set of dinosaur characters Project Bluefin publishes as
 // artwork, transcribed from `projectbluefin/website`'s own
-// `src/data/wolves-dinosaur-species.ts` at the pinned commit below. It is a
-// pure leaf package: no puregotk, no CGO, no GTK, so it is unit-testable on a
-// GTK-less host (docs/adr/0007-pure-leaf-packages-route-around-untestable-gtk.md).
+// `src/data/wolves-dinosaur-species.ts`; the illustrations are committed under
+// assets/, with their source and revision in assets/NOTICE. It is a pure leaf
+// package: no puregotk, no CGO, no GTK, so it is unit-testable on a GTK-less
+// host (docs/adr/0007-pure-leaf-packages-route-around-untestable-gtk.md).
 //
-// Only the catalog and the fetch live here. Decoding the WebP and encoding the
-// PNG is internal/avatar's transcoding step, and handing the result to
+// Only the catalog and the artwork live here. Decoding the WebP and encoding
+// the PNG is internal/avatar's transcoding step, and handing the result to
 // AccountsService is the dispatch step; both are separate work, so this
 // package deliberately stops at "the bytes the catalog names".
 package avatar
 
 import (
-	"context"
 	"embed"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"path"
 	"strings"
 	"sync"
-	"time"
 )
-
-// PinnedCommit is the `projectbluefin/website` revision every catalog Path is
-// resolved against.
-//
-// The artwork is pinned to a commit, not a branch: an avatar the user picked
-// must keep resolving to the same illustration after the website repository
-// moves on, and `main` there is a live site.
-const PinnedCommit = "92b81281649c0795f16f266f712c9a2798af54c4"
-
-// SourceRepository is the repository the illustrations come from. It is
-// exported so the picker can link to the provenance of the artwork.
-const SourceRepository = "https://github.com/projectbluefin/website"
-
-// dinoArtworkRaw serves one file of the repository at the pinned commit.
-//
-// The Path column is appended verbatim. Nothing here rewrites, normalizes, or
-// derives a path from an ID — see LookupPath for why that matters.
-const dinoArtworkRaw = "https://raw.githubusercontent.com/projectbluefin/website/" + PinnedCommit + "/"
 
 // dinoManifest is the embedded catalog, as `id<TAB>common name<TAB>species<TAB>path`.
 //
@@ -55,9 +33,9 @@ const dinoArtworkRaw = "https://raw.githubusercontent.com/projectbluefin/website
 // reason: title-casing an ID yields "Bob Torosaurus" where the project writes
 // "Bob".
 //
-// The catalog is embedded so the picker is complete with no network; the
-// artwork it names is embedded too (embeddedArtworkFS), so a pick reads from
-// the binary rather than the pinned commit.
+// The catalog and the artwork it names are both embedded (embeddedArtworkFS),
+// so a pick reads from the binary and no network is involved anywhere in this
+// package.
 //
 //go:embed assets/dino-avatars.txt
 var dinoManifest string
@@ -69,28 +47,13 @@ var dinoManifest string
 //go:embed assets/*.webp
 var embeddedArtworkFS embed.FS
 
-// fetchTimeout bounds the round trip. A single illustration is a couple of
-// hundred kilobytes; a slow network should surface a failure, not a frozen
-// dialog.
-const fetchTimeout = 10 * time.Second
-
-// maxArtworkBytes caps what one response may contribute to memory.
-//
-// The largest illustration in the catalog is 209 KiB, so this is roughly
-// tenfold headroom for the file growing. The cap exists for the response that
-// is not the file at all — a captive portal's login page, a proxy's error
-// document — and reading the limit plus one byte is what catches a truncated
-// payload instead of silently accepting it.
-const maxArtworkBytes = 2 * 1024 * 1024
-
 // ErrAvatarNotFound reports an ID the catalog does not list.
 var ErrAvatarNotFound = errors.New("avatar: no catalog entry with that id")
 
-// ErrArtworkNotFound reports a Path the pinned commit does not serve. The raw
-// endpoint answers 404 for a moved or misspelled path, which is the failure a
-// catalog edit causes and deserves its own message rather than a generic HTTP
-// error.
-var ErrArtworkNotFound = errors.New("avatar: the pinned commit serves no artwork at that path")
+// ErrArtworkNotFound reports a catalog Path the binary carries no bundled
+// artwork for. A manifest row added without its illustration is a packaging
+// error the caller can name rather than a silent failure to render it.
+var ErrArtworkNotFound = errors.New("avatar: no artwork bundled for that path")
 
 // Avatar is one selectable dinosaur character.
 type Avatar struct {
@@ -103,57 +66,18 @@ type Avatar struct {
 	CommonName string
 	// Species is the scientific name.
 	Species string
-	// Path is the artwork's location within the source repository at
-	// PinnedCommit, stored literally.
+	// Path is the artwork's location within the source repository, stored
+	// literally. It is the key the bundled copy is looked up under.
 	Path string
 }
 
-// FetchFunc is the network seam.
-//
-// The round trip lives behind a variable for the same reason internal/sbom's
-// and internal/livery's do: no test may make an outbound request, so the
-// package's tests point this at a loopback httptest server. Production never
-// replaces it.
-type FetchFunc func(ctx context.Context, url string) ([]byte, error)
-
-// Fetch is the function FetchAvatar falls back to when the binary embeds no
-// artwork for an entry. Tests replace it.
-var Fetch FetchFunc = httpFetch
-
-func httpFetch(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("avatar: building request: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("avatar: reaching the artwork repository: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrArtworkNotFound
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("avatar: the artwork repository answered %s", resp.Status)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxArtworkBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("avatar: reading artwork: %w", err)
-	}
-	if len(data) > maxArtworkBytes {
-		return nil, fmt.Errorf("avatar: artwork exceeds the %d byte limit", maxArtworkBytes)
-	}
-	return data, nil
-}
-
 // ArtworkFunc reads one catalog illustration from local storage, keyed by the
-// entry's literal Path column. It reports false when no local copy exists,
-// which is FetchAvatar's signal to fall back to the network. It is a variable
-// so tests can reach the network path.
+// entry's literal Path column. It reports false when the binary carries no
+// copy, which is FetchAvatar's signal to report ErrArtworkNotFound. It is a
+// variable so a test can reach that path.
 type ArtworkFunc func(artworkPath string) ([]byte, bool)
 
-// LocalArtwork is the function FetchAvatar consults before the network.
+// LocalArtwork is the function FetchAvatar reads the artwork from.
 var LocalArtwork ArtworkFunc = embeddedArtwork
 
 // embeddedArtwork returns the illustration embedded for one catalog Path.
@@ -225,26 +149,18 @@ func LookupPath(path string) (Avatar, bool) {
 	return entry, ok
 }
 
-// ArtworkURL returns the pinned URL the entry's artwork is served from.
-func ArtworkURL(entry Avatar) string {
-	return dinoArtworkRaw + entry.Path
-}
-
-// FetchAvatar retrieves one catalog illustration by ID, preferring the embedded
-// copy and falling back to the pinned commit only when none is embedded. The
-// bytes come from the Path column, never a derivation from the ID.
-func FetchAvatar(ctx context.Context, id string) ([]byte, error) {
+// FetchAvatar returns one catalog illustration by ID, read from the artwork
+// bundled in the binary. The bytes come from the Path column, never a
+// derivation from the ID.
+func FetchAvatar(id string) ([]byte, error) {
 	entry, ok := Lookup(id)
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrAvatarNotFound, id)
 	}
 
-	if data, ok := LocalArtwork(entry.Path); ok {
-		return data, nil
+	data, ok := LocalArtwork(entry.Path)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrArtworkNotFound, entry.Path)
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	defer cancel()
-
-	return Fetch(ctx, ArtworkURL(entry))
+	return data, nil
 }

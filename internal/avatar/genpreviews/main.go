@@ -1,6 +1,6 @@
 // Command genpreviews writes the embedded preview PNGs the picker loads.
 //
-// For every catalog entry it transcodes the embedded full illustration at
+// For every catalog entry it transcodes the bundled illustration at
 // PreviewSize and writes it to assets/preview/<base>.png (bluefin.webp ->
 // bluefin.png). Run it with `go generate ./internal/avatar`, which runs this
 // program from the package directory so assets/preview resolves inside the
@@ -10,7 +10,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"log"
 	"os"
 	"path"
@@ -27,9 +26,9 @@ func main() {
 	}
 
 	for _, entry := range avatar.Catalog() {
-		webp, err := avatar.FetchAvatar(context.Background(), entry.ID)
+		webp, err := avatar.FetchAvatar(entry.ID)
 		if err != nil {
-			log.Fatalf("genpreviews: fetching %s: %v", entry.ID, err)
+			log.Fatalf("genpreviews: reading %s: %v", entry.ID, err)
 		}
 		png, err := avatar.TranscodePreviewWebPToPNG(bytes.NewReader(webp))
 		if err != nil {

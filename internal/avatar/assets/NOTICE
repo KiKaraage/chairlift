@@ -1,0 +1,10 @@
+Project Bluefin Dinosaur Avatar Artwork Attribution & Licensing
+
+- `internal/avatar/assets/*.webp`
+  Source: https://github.com/projectbluefin/website (public/characters/**)
+  Revision: 92b81281649c0795f16f266f712c9a2798af54c4
+  Attribution: Project Bluefin artwork
+
+- `internal/avatar/assets/preview/*.png`
+  Derived from the illustrations above by `go generate ./internal/avatar`
+  (TranscodePreviewWebPToPNG, 200x200).
