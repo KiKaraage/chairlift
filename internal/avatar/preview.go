@@ -8,12 +8,13 @@ import (
 	"strings"
 )
 
-//go:generate go run ./genpreviews
-
 // embeddedPreviewFS holds one precomputed preview PNG per catalog entry, keyed
-// by the artwork's base name (bluefin.webp -> bluefin.png). Regenerate with
-// `go generate ./internal/avatar` whenever the catalog, transcode, or
-// PreviewSize changes.
+// by the artwork's base name (bluefin.webp -> bluefin.png).
+//
+// The PNGs are committed data rather than build output, so there is no codegen
+// step and nothing regenerates them: a catalog, transcode, or PreviewSize
+// change leaves them stale with nothing to notice. docs/design/overview.md
+// carries the procedure for writing one.
 //
 //go:embed assets/preview/*.png
 var embeddedPreviewFS embed.FS
