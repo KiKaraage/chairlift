@@ -140,8 +140,30 @@ func readBoundedWebP(r io.Reader) ([]byte, error) {
 // visibleBounds is the bounding box of src's non-transparent pixels, so
 // transparent margins in the artwork do not shrink the character. A fully
 // transparent frame keeps its whole bounds.
+//
+// The per-pixel At() scan dominates the transcode on large artwork, so the
+// concrete types golang.org/x/image/webp returns are read through their own
+// alpha storage instead; any other type falls back to the generic scan.
 func visibleBounds(src image.Image) image.Rectangle {
 	b := src.Bounds()
+	switch img := src.(type) {
+	case *image.YCbCr:
+		// No alpha channel: every pixel is visible.
+		return b
+	case *image.NYCbCrA:
+		if box, ok := alphaBounds(img.A, img.AStride, 1, b); ok {
+			return box
+		}
+	case *image.NRGBA:
+		if box, ok := alphaBounds(img.Pix, img.Stride, 4, b); ok {
+			return box
+		}
+	case *image.RGBA:
+		if box, ok := alphaBounds(img.Pix, img.Stride, 4, b); ok {
+			return box
+		}
+	}
+
 	box := image.Rectangle{}
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
@@ -154,6 +176,40 @@ func visibleBounds(src image.Image) image.Rectangle {
 		return b
 	}
 	return box
+}
+
+// alphaBounds returns the bounding box of the non-zero entries in a row-major
+// alpha plane: one entry per pixel, step bytes apart, stride bytes per row. It
+// reports false when no pixel is visible, leaving the caller's whole-bounds
+// fallback to apply.
+func alphaBounds(plane []byte, stride, step int, b image.Rectangle) (image.Rectangle, bool) {
+	minX, minY := b.Max.X, b.Max.Y
+	maxX, maxY := b.Min.X, b.Min.Y
+	found := false
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		row := plane[(y-b.Min.Y)*stride:]
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if row[(x-b.Min.X)*step+step-1] != 0 {
+				found = true
+				if x < minX {
+					minX = x
+				}
+				if x+1 > maxX {
+					maxX = x + 1
+				}
+				if y < minY {
+					minY = y
+				}
+				if y+1 > maxY {
+					maxY = y + 1
+				}
+			}
+		}
+	}
+	if !found {
+		return image.Rectangle{}, false
+	}
+	return image.Rect(minX, minY, maxX, maxY), true
 }
 
 // fitInCircle returns the destination rectangle, centred on an edge x edge

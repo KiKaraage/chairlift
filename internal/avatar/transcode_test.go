@@ -298,3 +298,52 @@ func TestTranscodePreviewWebPToPNGIsPreviewSized(t *testing.T) {
 		t.Errorf("bounds = %v, want %v", img.Bounds(), want)
 	}
 }
+
+// genericVisibleBounds is the original per-pixel scan, kept as the reference
+// the typed fast paths must agree with.
+func genericVisibleBounds(src image.Image) image.Rectangle {
+	b := src.Bounds()
+	box := image.Rectangle{}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if _, _, _, a := src.At(x, y).RGBA(); a != 0 {
+				box = box.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	if box.Empty() {
+		return b
+	}
+	return box
+}
+
+// TestVisibleBoundsFastPathsAgreeWithTheGenericScan covers every decoded type
+// the WebP decoder hands the transcode — lossy *image.NYCbCrA, lossless
+// *image.NRGBA, and no-alpha *image.YCbCr — so a fast path reading the wrong
+// alpha plane cannot silently shift the crop.
+func TestVisibleBoundsFastPathsAgreeWithTheGenericScan(t *testing.T) {
+	images := map[string]image.Image{}
+	for _, entry := range Catalog() {
+		data, ok := embeddedArtwork(entry.Path)
+		if !ok {
+			t.Fatalf("no embedded artwork for %s", entry.ID)
+		}
+		src, err := webp.Decode(bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("decoding %s: %v", entry.ID, err)
+		}
+		images["catalog/"+entry.ID] = src
+	}
+	for _, name := range []string{"katharina.webp", "dakota.webp", "gradient-lossy.webp"} {
+		src, err := webp.Decode(bytes.NewReader(readWebPSample(t, name)))
+		if err != nil {
+			t.Fatalf("decoding %s: %v", name, err)
+		}
+		images["testdata/"+name] = src
+	}
+	for name, src := range images {
+		if got, want := visibleBounds(src), genericVisibleBounds(src); got != want {
+			t.Errorf("%s (%T): visibleBounds = %v, generic scan = %v", name, src, got, want)
+		}
+	}
+}
