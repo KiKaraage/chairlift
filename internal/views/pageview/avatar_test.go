@@ -94,7 +94,7 @@ func TestAvatarChooserDecidesApplyThroughOneRule(t *testing.T) {
 	if calls == 0 || calls != ruled {
 		t.Errorf("%d of %d Apply sensitivity changes bypass AvatarApplyEnabled", calls-ruled, calls)
 	}
-	if !strings.Contains(string(data), "pageview.AvatarApplyEnabled(false, p.png != nil)") {
-		t.Error("the apply completion no longer requires artwork before re-offering Apply")
+	if !strings.Contains(string(data), "pageview.AvatarApplyEnabled(false, p.loaded)") {
+		t.Error("the apply completion no longer requires a landed preview before re-offering Apply")
 	}
 }
