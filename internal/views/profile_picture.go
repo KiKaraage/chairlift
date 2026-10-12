@@ -246,9 +246,10 @@ func (uh *UserHome) previewAvatar(p *avatarPicker, index int) {
 				log.Printf("avatar: previewing %s: %v", entry.ID, err)
 				// The widget still holds the previous entry's
 				// image. Leaving it beside a banner naming this
-				// entry would draw one dinosaur and name another,
-				// so the avatar falls back to its initials.
-				p.preview.SetCustomImage((*gdk.Texture)(nil))
+				// entry would draw one dinosaur and name another.
+				// A nil *PaintableBase passes NULL; a bare nil
+				// interface would panic inside the binding.
+				p.preview.SetCustomImage((*gdk.PaintableBase)(nil))
 				p.banner.SetTitle(pageview.AvatarPreviewFailed(entry))
 				p.banner.SetRevealed(true)
 				return

@@ -126,7 +126,7 @@ func TestAvatarPreviewFailureClearsTheStaleImage(t *testing.T) {
 	if start < 0 {
 		t.Fatal("the preview failure is no longer reached from an err check")
 	}
-	const clear = "p.preview.SetCustomImage((*gdk.Texture)(nil))"
+	const clear = "p.preview.SetCustomImage((*gdk.PaintableBase)(nil))"
 	if !strings.Contains(src[start:end], clear) {
 		t.Error("a failed preview leaves the previous entry's picture in the chooser")
 	}
