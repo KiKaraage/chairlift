@@ -267,12 +267,12 @@ var (
 )
 
 // previewTexture returns the shared texture for one entry, building it from
-// the embedded preview PNG on first use.
+// the embedded preview PNG on first use. The lock is held across the build so
+// the prefetch and a concurrent pick never decode the same entry twice.
 func previewTexture(id string) (*gdk.Texture, error) {
 	previewTextureMu.Lock()
-	cached, ok := previewTextures[id]
-	previewTextureMu.Unlock()
-	if ok {
+	defer previewTextureMu.Unlock()
+	if cached, ok := previewTextures[id]; ok {
 		return cached, nil
 	}
 
@@ -285,9 +285,7 @@ func previewTexture(id string) (*gdk.Texture, error) {
 		return nil, err
 	}
 
-	previewTextureMu.Lock()
 	previewTextures[id] = texture
-	previewTextureMu.Unlock()
 	return texture, nil
 }
 
