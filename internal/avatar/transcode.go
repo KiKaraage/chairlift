@@ -21,7 +21,7 @@ const AvatarSize = 512
 // PreviewSize is the edge length, in pixels, of the square canvas the picker's
 // on-screen preview is scaled to. The AdwAvatar it feeds is 128 logical pixels,
 // so AvatarSize would encode detail the screen cannot show.
-const PreviewSize = 200
+const PreviewSize = 256
 
 // MaxPNGBytes is the byte ceiling on one encoded applied-avatar PNG: 1 MiB
 // (1,048,576 bytes).

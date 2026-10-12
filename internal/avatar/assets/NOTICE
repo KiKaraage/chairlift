@@ -7,4 +7,4 @@ Project Bluefin Dinosaur Avatar Artwork Attribution & Licensing
   Unmodified copies of `projectbluefin/website` at `public/characters/**`, revision `92b81281649c0795f16f266f712c9a2798af54c4`
 
 - `internal/avatar/assets/preview/*.png`
-  Derived from the illustrations above, scaled to 200x200 with `avatar.TranscodePreviewWebPToPNG` at `avatar.PreviewSize`
+  Derived from the illustrations above, scaled to 256x256 with `avatar.TranscodePreviewWebPToPNG` at `avatar.PreviewSize`
