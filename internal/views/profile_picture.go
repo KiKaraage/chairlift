@@ -32,7 +32,7 @@ type avatarPicker struct {
 	avatar *adw.Avatar
 
 	// The chooser is built once, on first open, and re-presented. Its rows
-	// are the ten catalog entries and never change, so the list is filled
+	// are one per catalog entry and never change, so the list is filled
 	// once and one row-activated handler maps a row index into catalog.
 	dialog  *adw.Dialog
 	banner  *adw.Banner
