@@ -586,11 +586,9 @@ An agent must not break these:
   keeps its scroll position and a step entered mid-page hid its own heading;
   bookends use the setup stack, not sidebar routes. Next and Back mutate no
   configuration. Repeated requests preserve progress; an empty inventory opens
-  no flow. **Launch Bazaar App Store** records completion and version, launches
-  Bazaar through its desktop entry off the GTK thread, then quits the app.
-  Save or launch failures leave a retryable conclusion. Dismiss records skip
-  without demoting completed; a crash records nothing. Dry-run previews writes
-  and suppresses Bazaar, but still exercises the final application exit.
+  no flow. **Finish** records completion and version, then returns to Control
+  Center; a save failure reports a toast. Dismiss records skip without
+  demoting completed; a crash records nothing. Dry-run previews writes.
   `test/e2e/features/setup.feature` covers both explicit flags, normal launch,
   navigation, and dismissal; `firstrun.Keys` remain held to the shipped schema.
 - **The Homebrew executable has one resolution.** `internal/homebrew.ExecutablePath`
@@ -685,8 +683,12 @@ An agent must not break these:
   fixed enable/disable actions for its system daemon and requires actual socket
   readiness for this session, not installed CLI tools alone. Missing installed
   helper actions leave the affected switches insensitive with an explanation
-  rather than hiding the options. IDE and terminal-editor installs are
-  individually selected, including one JetBrains Toolbox entry. Gaming selects
+  rather than hiding the options. A confirmed Developer Mode enable installs
+  the Dev Container CLI (`devcontainer`) through Homebrew when available;
+  its own gate refuses overlapping installs, previews use Homebrew's dry-run
+  boundary without refreshing inventories, and failures never reverse developer
+  access. IDEs and editors are not offered in the Developer group (Bazaar or
+  the Apps page). Gaming selects
   typed application/runtime refs, installs missing ones system-wide, and
   keeps partial failures visible. Its inventory reads both scopes, so a copy
   an earlier release installed per-user counts as present and is not
@@ -770,7 +772,8 @@ An agent must not break these:
   toast; do not add a second notification for the same instant event.
 - **Developer-mode feed onboarding is opt-in, follows the enable, and never
   reverses it.** `dx_group`'s `install_pulp` and `stage_feeds` both default to
-  `false`, and they are the only optional work the Developer Mode switch does
+  `false`, and together with automatic Dev Container CLI (`devcontainer`)
+  installation are the only additional actions the Developer Mode switch runs
   beyond the privileged group promotion. `startDeveloperFeedSetup`
   (`internal/views/features_page.go`) runs them from the same success branch
   `openDeveloperOnboarding` uses, behind
